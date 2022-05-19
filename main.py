@@ -1,6 +1,5 @@
 import dearpygui.dearpygui as dpg
 import numpy as np
-import asyncio
 import astropy.constants as const
 from collections import namedtuple
 

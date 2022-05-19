@@ -1,0 +1,3 @@
+astropy==5.0.4
+dearpygui==1.6.2
+numpy==1.21.5
