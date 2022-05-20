@@ -141,15 +141,15 @@ def calculate_trajectories():
             body_accelerations[body_key][i + 1] = new_accel
 
             if i % update_freq == 0:
-                x_pos = [r.x for r in body_positions[body_key]]
-                y_pos = [r.y for r in body_positions[body_key]]
-                z_pos = [r.z for r in body_positions[body_key]]
+                x_pos = [r.x for r in body_positions[body_key][0:i + 1]]
+                y_pos = [r.y for r in body_positions[body_key][0:i + 1]]
+                z_pos = [r.z for r in body_positions[body_key][0:i + 1]]
 
-                dpg.set_value(f"td_line_{body_key}", [x_pos[0:i + 1], y_pos[0:i + 1]])
-                dpg.set_value(f"side_line_{body_key}", [x_pos[0:i + 1], z_pos[0:i + 1]])
+                dpg.set_value(f"td_line_{body_key}", [x_pos[::update_freq], y_pos[::update_freq]])
+                dpg.set_value(f"side_line_{body_key}", [x_pos[::update_freq], z_pos[::update_freq]])
 
-                dpg.set_value(f"td_drag_{body_key}", [x_pos[i + 1], y_pos[i + 1]])
-                dpg.set_value(f"side_drag_{body_key}", [x_pos[i + 1], z_pos[i + 1]])
+                dpg.set_value(f"td_drag_{body_key}", [x_pos[i], y_pos[i]])
+                dpg.set_value(f"side_drag_{body_key}", [x_pos[i], z_pos[i]])
 
         dpg.set_value("sim_progress", i / (sim_time - 1))
 
@@ -159,6 +159,7 @@ def calculate_trajectories():
 
 # region GUI Setup and Logic
 
+# Mac Scale? width=1265, height=680
 dpg.create_context()
 dpg.create_viewport(title='Gravity Tool', width=1280, height=720, resizable=False)
 dpg.setup_dearpygui()
