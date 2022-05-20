@@ -7,11 +7,13 @@ from collections import namedtuple
 
 Body = namedtuple('Body', ['id', 'name', 'position', 'velocity', 'mass', 'color'])
 Vec2 = namedtuple('Vector2', ['x', 'y'])
+Vec3 = namedtuple('Vector3', ['x', 'y', 'z'])
 
 default_graph_scale = 11.5
 graph_scale = 11.5
 graph_center_x = 0
 graph_center_y = 0
+graph_center_z = 0
 
 colors = [[68, 216, 0, 255],
           [255, 140, 0, 255],
@@ -30,7 +32,7 @@ body_color = colors[0]
 bodies = {}
 body_names = []
 
-selected_body = Body(0, "", Vec2(0, 0), Vec2(0, 0), 0, [0, 0, 0, 0])
+selected_body = Body(0, "", Vec3(0, 0, 0), Vec3(0, 0, 0), 0, [0, 0, 0, 0])
 
 reset = True
 
@@ -42,15 +44,17 @@ reset = True
 def n_body_grav_accel(body, n_bodies):
     accel_sum_x = 0
     accel_sum_y = 0
+    accel_sum_z = 0
 
     for n_body in n_bodies:
-        r = np.sqrt((body.position.x - n_body.position.x) ** 2 + (body.position.y - n_body.position.y) ** 2)
+        r = np.sqrt((body.position.x - n_body.position.x) ** 2 + (body.position.y - n_body.position.y) ** 2 + (body.position.z - n_body.position.z) ** 2)
         scaler = -(const.G.value * n_body.mass) / r ** 3
 
         accel_sum_x += (body.position.x - n_body.position.x) * scaler
         accel_sum_y += (body.position.y - n_body.position.y) * scaler
+        accel_sum_z += (body.position.z - n_body.position.z) * scaler
 
-    return Vec2(accel_sum_x, accel_sum_y)
+    return Vec3(accel_sum_x, accel_sum_y, accel_sum_z)
 
 
 def current_body(body, position, velocity):
@@ -59,21 +63,27 @@ def current_body(body, position, velocity):
 
 def reset_trajectories():
     for body_key, body_value in bodies.items():
-        if dpg.does_item_exist(f"line_{body_key}"):
-            dpg.delete_item(f"line_{body_key}")
+        if dpg.does_item_exist(f"td_line_{body_key}"):
+            dpg.delete_item(f"td_line_{body_key}")
+
+        if dpg.does_item_exist(f"side_line_{body_key}"):
+            dpg.delete_item(f"side_line_{body_key}")
 
         if dpg.does_item_exist(f"line_theme_{body_key}"):
             dpg.delete_item(f"line_theme_{body_key}")
 
-        dpg.set_value(body_key, body_value.position)
+        dpg.set_value(f"td_drag_{body_key}", Vec2(body_value.position.x, body_value.position.y))
+        dpg.set_value(f"side_drag_{body_key}", Vec2(body_value.position.x, body_value.position.z))
 
         with dpg.theme(tag=f"line_theme_{body_key}"):
             with dpg.theme_component(dpg.mvLineSeries):
                 dpg.add_theme_color(dpg.mvPlotCol_Line, body_value.color, category=dpg.mvThemeCat_Plots)
 
-        dpg.add_line_series([], [], parent="y_axis", tag=f"line_{body_key}")
+        dpg.add_line_series([], [], parent="td_y_axis", tag=f"td_line_{body_key}")
+        dpg.add_line_series([], [], parent="side_z_axis", tag=f"side_line_{body_key}")
 
-        dpg.bind_item_theme(f"line_{body_key}", f"line_theme_{body_key}")
+        dpg.bind_item_theme(f"td_line_{body_key}", f"line_theme_{body_key}")
+        dpg.bind_item_theme(f"side_line_{body_key}", f"line_theme_{body_key}")
 
     global reset
     reset = True
@@ -94,14 +104,14 @@ def calculate_trajectories():
     body_accelerations = {}
 
     for body_key, body_value in bodies.items():
-        body_positions[body_key] = [Vec2(0, 0) for _ in range(0, sim_time)]
+        body_positions[body_key] = [Vec3(0, 0, 0) for _ in range(0, sim_time)]
 
         body_positions[body_key][0] = body_value.position
 
-        body_velocities[body_key] = [Vec2(0, 0) for _ in range(0, sim_time)]
+        body_velocities[body_key] = [Vec3(0, 0, 0) for _ in range(0, sim_time)]
         body_velocities[body_key][0] = body_value.velocity
 
-        body_accelerations[body_key] = [Vec2(0, 0) for _ in range(0, sim_time)]
+        body_accelerations[body_key] = [Vec3(0, 0, 0) for _ in range(0, sim_time)]
         n_bodies = [value for key, value in bodies.items() if key != body_key]
 
         body_accelerations[body_key][0] = n_body_grav_accel(body_value, n_bodies)
@@ -116,13 +126,15 @@ def calculate_trajectories():
 
             x = body.position.x + body.velocity.x * h + accel.x * (h * h * 0.5)
             y = body.position.y + body.velocity.y * h + accel.y * (h * h * 0.5)
-            new_position = Vec2(x, y)
+            z = body.position.z + body.velocity.z * h + accel.z * (h * h * 0.5)
+            new_position = Vec3(x, y, z)
 
             new_accel = n_body_grav_accel(body, n_bodies)
 
             vx = body.velocity.x + (accel.x + new_accel.x) * (h / 2)
             vy = body.velocity.y + (accel.y + new_accel.y) * (h / 2)
-            new_velocity = Vec2(vx, vy)
+            vz = body.velocity.z + (accel.z + new_accel.z) * (h / 2)
+            new_velocity = Vec3(vx, vy, vz)
 
             body_positions[body_key][i + 1] = new_position
             body_velocities[body_key][i + 1] = new_velocity
@@ -131,9 +143,13 @@ def calculate_trajectories():
             if i % update_freq == 0:
                 x_pos = [r.x for r in body_positions[body_key]]
                 y_pos = [r.y for r in body_positions[body_key]]
+                z_pos = [r.z for r in body_positions[body_key]]
 
-                dpg.set_value(f"line_{body_key}", [x_pos[0:i + 1], y_pos[0:i + 1]])
-                dpg.set_value(body_key, [x_pos[i + 1], y_pos[i + 1]])
+                dpg.set_value(f"td_line_{body_key}", [x_pos[0:i + 1], y_pos[0:i + 1]])
+                dpg.set_value(f"side_line_{body_key}", [x_pos[0:i + 1], z_pos[0:i + 1]])
+
+                dpg.set_value(f"td_drag_{body_key}", [x_pos[i + 1], y_pos[i + 1]])
+                dpg.set_value(f"side_drag_{body_key}", [x_pos[i + 1], z_pos[i + 1]])
 
         dpg.set_value("sim_progress", i / (sim_time - 1))
 
@@ -151,13 +167,16 @@ dpg.setup_dearpygui()
 # region Item Update Wrapper Methods
 
 def update_graph_position():
-    dpg.set_axis_limits("x_axis", graph_center_x - graph_scale, graph_center_x + graph_scale)
-    dpg.set_axis_limits("y_axis", graph_center_y - graph_scale, graph_center_y + graph_scale)
+    dpg.set_axis_limits("td_x_axis", graph_center_x - graph_scale, graph_center_x + graph_scale)
+    dpg.set_axis_limits("td_y_axis", (graph_center_y - graph_scale) * 0.559, (graph_center_y + graph_scale) * 0.559)
+
+    dpg.set_axis_limits("side_x_axis", graph_center_x - graph_scale, graph_center_x + graph_scale)
+    dpg.set_axis_limits("side_z_axis", (graph_center_z - graph_scale) * 0.383, (graph_center_z + graph_scale) * 0.383)
 
 
 def update_graph_scale(_, value):
     global graph_scale
-    graph_scale = 1 * 10 ** value
+    graph_scale = 10 ** value
     update_graph_position()
 
 
@@ -173,6 +192,12 @@ def update_graph_center_y(_, value):
     update_graph_position()
 
 
+def update_graph_center_z(_, value):
+    global graph_center_z
+    graph_center_z = value
+    update_graph_position()
+
+
 def update_selected_body_group():
     dpg.delete_item("selected_body_combo")
     dpg.add_combo(body_names, default_value=selected_body.name, tag="selected_body_combo", callback=select_body, parent="selected_body_group")
@@ -181,16 +206,22 @@ def update_selected_body_group():
     dpg.draw_circle((10, 9), 5, fill=selected_body.color, tag="selected_body_circle", parent="selected_body_drawlist")
 
     dpg.delete_item("selected_body_x_input")
-    dpg.add_input_float(tag="selected_body_x_input", step=100, step_fast=1000, default_value=selected_body.position.x, width=217, parent="selected_body_x_group", callback=edit_body)
+    dpg.add_input_float(tag="selected_body_x_input", step=100, step_fast=1000, default_value=selected_body.position.x, width=137, parent="selected_body_x_group", callback=edit_body)
 
     dpg.delete_item("selected_body_y_input")
-    dpg.add_input_float(tag="selected_body_y_input", step=100, step_fast=1000, default_value=selected_body.position.y, width=217, parent="selected_body_y_group", callback=edit_body)
+    dpg.add_input_float(tag="selected_body_y_input", step=100, step_fast=1000, default_value=selected_body.position.y, width=137, parent="selected_body_y_group", callback=edit_body)
+
+    dpg.delete_item("selected_body_z_input")
+    dpg.add_input_float(tag="selected_body_z_input", step=100, step_fast=1000, default_value=selected_body.position.z, width=137, parent="selected_body_z_group", callback=edit_body)
 
     dpg.delete_item("selected_body_vx_input")
-    dpg.add_input_float(tag="selected_body_vx_input", step=100, step_fast=1000, default_value=selected_body.velocity.x, width=217, parent="selected_body_vx_group", callback=edit_body)
+    dpg.add_input_float(tag="selected_body_vx_input", step=100, step_fast=1000, default_value=selected_body.velocity.x, width=137, parent="selected_body_vx_group", callback=edit_body)
 
     dpg.delete_item("selected_body_vy_input")
-    dpg.add_input_float(tag="selected_body_vy_input", step=100, step_fast=1000, default_value=selected_body.velocity.y, width=217, parent="selected_body_vy_group", callback=edit_body)
+    dpg.add_input_float(tag="selected_body_vy_input", step=100, step_fast=1000, default_value=selected_body.velocity.y, width=137, parent="selected_body_vy_group", callback=edit_body)
+
+    dpg.delete_item("selected_body_vz_input")
+    dpg.add_input_float(tag="selected_body_vz_input", step=100, step_fast=1000, default_value=selected_body.velocity.z, width=137, parent="selected_body_vz_group", callback=edit_body)
 
     dpg.delete_item("selected_body_mass_input")
     dpg.add_input_float(tag="selected_body_mass_input", step=100, step_fast=1000, default_value=selected_body.mass, parent="selected_body_mass_group", callback=edit_body)
@@ -206,11 +237,19 @@ def reset_slider_value(item_tag, value, slider_function):
     update_graph_position()
 
 
+def reset_input_value(item_tag, value, slider_function):
+    dpg.set_value(item_tag, value)
+    slider_function(0, value)
+    update_graph_position()
+
+
 def reset_create_body_input():
     dpg.set_value("create_x_input", 0)
     dpg.set_value("create_y_input", 0)
+    dpg.set_value("create_z_input", 0)
     dpg.set_value("create_vx_input", 0)
     dpg.set_value("create_vy_input", 0)
+    dpg.set_value("create_vz_input", 0)
     dpg.set_value("create_mass_input", 0)
     dpg.set_value("create_name_input", f"Body {body_count}")
     dpg.set_value("create_color_input", body_color)
@@ -218,20 +257,39 @@ def reset_create_body_input():
 
 def reset_selected_body():
     global selected_body
-    selected_body = Body(0, "", Vec2(0, 0), Vec2(0, 0), 0, [0, 0, 0, 0])
+    selected_body = Body(0, "", Vec3(0, 0, 0), Vec3(0, 0, 0), 0, [0, 0, 0, 0])
 
 # endregion
 
 
 # region Item Callback Methods
 
-def drag_body(body_id):
+def drag_body(raw_body_id):
     if not reset:
         return
 
-    body_x, body_y, z, w = dpg.get_value(body_id)
-    body_position = Vec2(body_x, body_y)
+    body_id = raw_body_id
+
+    if body_id.startswith("td_drag_"):
+        body_id = raw_body_id.replace("td_drag_", "")
+
+    if body_id.startswith("side_drag_"):
+        body_id = raw_body_id.replace("side_drag_", "")
+
     body = bodies[body_id]
+    body_x = body.position.x
+    body_y = body.position.y
+    body_z = body.position.z
+
+    if raw_body_id.startswith("td_drag_"):
+        body_x, body_y, _, _ = dpg.get_value(raw_body_id)
+        dpg.set_value(f"side_drag_{body_id}", Vec2(body_x, body_z))
+
+    if raw_body_id.startswith("side_drag_"):
+        body_x, body_z, _, _ = dpg.get_value(raw_body_id)
+        dpg.set_value(f"td_drag_{body_id}", Vec2(body_x, body_y))
+
+    body_position = Vec3(body_x, body_y, body_z)
 
     edited_body = Body(body.id, body.name, body_position, body.velocity, body.mass, body.color)
     bodies[body_id] = edited_body
@@ -256,21 +314,27 @@ def select_body(item_tag):
 def edit_body():
     body_x = dpg.get_value("selected_body_x_input")
     body_y = dpg.get_value("selected_body_y_input")
+    body_z = dpg.get_value("selected_body_z_input")
     body_vx = dpg.get_value("selected_body_vx_input")
     body_vy = dpg.get_value("selected_body_vy_input")
+    body_vz = dpg.get_value("selected_body_vz_input")
     body_mass = dpg.get_value("selected_body_mass_input")
 
-    body_position = Vec2(body_x, body_y)
-    body_velocity = Vec2(body_vx, body_vy)
+    body_position = Vec3(body_x, body_y, body_z)
+    body_velocity = Vec3(body_vx, body_vy, body_vz)
 
-    body = Body(selected_body.id, selected_body.name, body_position,body_velocity, body_mass, selected_body.color)
+    body = Body(selected_body.id, selected_body.name, body_position, body_velocity, body_mass, selected_body.color)
 
     bodies[selected_body.id] = body
-    dpg.set_value(selected_body.id, [body_x, body_y, 0, 0])
+
+    dpg.set_value(f"td_drag_{body.id}", Vec2(body.position.x, body.position.y))
+    dpg.set_value(f"side_drag_{body.id}", Vec2(body.position.x, body.position.z))
 
 
 def create_body_manual(name, position, velocity, mass, color):
-    body_id = dpg.add_drag_point(label=name, parent="main_graph", default_value=position, color=color, callback=drag_body)
+    body_id = f"{name.lower().replace(' ', '_')}"
+    dpg.add_drag_point(tag=f"td_drag_{body_id}", label=name, parent="td_graph", default_value=Vec2(position.x, position.y), color=color, callback=drag_body)
+    dpg.add_drag_point(tag=f"side_drag_{body_id}", label=name, parent="side_graph", default_value=Vec2(position.x, position.z), color=color, callback=drag_body)
 
     body = Body(body_id, name, position, velocity, mass, color)
 
@@ -299,13 +363,15 @@ def create_body():
     body_name = dpg.get_value("create_name_input")
     body_x = dpg.get_value("create_x_input")
     body_y = dpg.get_value("create_y_input")
+    body_z = dpg.get_value("create_z_input")
     body_vx = dpg.get_value("create_vx_input")
     body_vy = dpg.get_value("create_vy_input")
+    body_vz = dpg.get_value("create_vz_input")
     body_mass = dpg.get_value("create_mass_input")
     color = dpg.get_value("create_color_input")
 
-    body_position = Vec2(body_x, body_y)
-    body_velocity = Vec2(body_vx, body_vy)
+    body_position = Vec3(body_x, body_y, body_z)
+    body_velocity = Vec3(body_vx, body_vy, body_vz)
 
     create_body_manual(body_name, body_position, body_velocity, body_mass, color)
 
@@ -323,36 +389,48 @@ def delete_body():
 # region DearPyGui Item Initiation
 
 with dpg.window(label="Graph", width=681, height=681, no_resize=True, no_move=True, no_close=True, no_collapse=True):
-    with dpg.plot(label="Top-Down View", height=-1, width=-1, tag="main_graph", anti_aliased=True):
-        dpg.add_plot_axis(dpg.mvXAxis, label="x (m)", tag="x_axis")
+    with dpg.plot(label="Top-Down View", height=381, width=-1, tag="td_graph", anti_aliased=True):
+        dpg.add_plot_axis(dpg.mvXAxis, label="x (m)", tag="td_x_axis")
         dpg.set_axis_limits(dpg.last_item(), graph_center_x - 10 ** default_graph_scale, graph_center_x + 10 ** default_graph_scale)
 
-        dpg.add_plot_axis(dpg.mvYAxis, label="y (m)", tag="y_axis")
-        dpg.set_axis_limits(dpg.last_item(), -graph_center_y - 10 ** default_graph_scale, graph_center_y + 10 ** default_graph_scale)
+        dpg.add_plot_axis(dpg.mvYAxis, label="y (m)", tag="td_y_axis")
+        dpg.set_axis_limits(dpg.last_item(), (graph_center_y - 10 ** default_graph_scale) * 0.559, (graph_center_y + 10 ** default_graph_scale) * 0.559)
+
+    with dpg.plot(label="Side View", height=261, width=-1, tag="side_graph", anti_aliased=True):
+        dpg.add_plot_axis(dpg.mvXAxis, label="x (m)", tag="side_x_axis")
+        dpg.set_axis_limits(dpg.last_item(), graph_center_x - 10 ** default_graph_scale, graph_center_x + 10 ** default_graph_scale)
+
+        dpg.add_plot_axis(dpg.mvYAxis, label="z (m)", tag="side_z_axis")
+        dpg.set_axis_limits(dpg.last_item(), (graph_center_z - 10 ** default_graph_scale) * 0.383, (graph_center_z + 10 ** default_graph_scale) * 0.383)
 
 with dpg.window(label="Settings", width=583, height=681, pos=(681, 0), no_resize=True, no_move=True, no_close=True, no_collapse=True):
 
     # region Graph Position Child Window
 
-    with dpg.child_window(menubar=True, height=100):
+    with dpg.child_window(menubar=True, height=123):
         with dpg.menu_bar():
             dpg.add_text("Graph Controls")
 
         # Graph Scale Settings
         with dpg.group(horizontal=True):
             dpg.add_text("Scale   ")
-            dpg.add_slider_float(width=435, min_value=0, max_value=13, default_value=default_graph_scale, callback=update_graph_scale, tag="scale_slider")
-            dpg.add_button(label="Reset", callback=lambda: reset_slider_value("scale_slider", default_graph_scale, update_graph_scale))
+            dpg.add_slider_float(width=435, min_value=0, max_value=14, default_value=default_graph_scale, callback=update_graph_scale, tag="scale_slider")
+            dpg.add_button(label="Reset", callback=lambda: reset_input_value("scale_slider", default_graph_scale, update_graph_scale))
 
         with dpg.group(horizontal=True):
             dpg.add_text("X Center")
-            dpg.add_slider_float(width=435, min_value=-3E11, max_value=3E11, default_value=0, callback=update_graph_center_x, tag="x_center_slider")
-            dpg.add_button(label="Reset", callback=lambda: reset_slider_value("x_center_slider", 0, update_graph_center_x))
+            dpg.add_input_float(width=435, default_value=0, callback=update_graph_center_x, tag="x_center_input")
+            dpg.add_button(label="Reset", callback=lambda: reset_input_value("x_center_input", 0, update_graph_center_x))
 
         with dpg.group(horizontal=True):
             dpg.add_text("Y Center")
-            dpg.add_slider_float(width=435, min_value=-3E11, max_value=3E11, default_value=0, callback=update_graph_center_y, tag="y_center_slider")
-            dpg.add_button(label="Reset", callback=lambda: reset_slider_value("y_center_slider", 0, update_graph_center_y))
+            dpg.add_input_float(width=435, default_value=0, callback=update_graph_center_y, tag="y_center_input")
+            dpg.add_button(label="Reset", callback=lambda: reset_input_value("y_center_input", 0, update_graph_center_y))
+
+        with dpg.group(horizontal=True):
+            dpg.add_text("Z Center")
+            dpg.add_input_float(width=435, default_value=0, callback=update_graph_center_z, tag="z_center_input")
+            dpg.add_button(label="Reset", callback=lambda: reset_input_value("z_center_input", 0, update_graph_center_z))
 
     # endregion
 
@@ -372,19 +450,25 @@ with dpg.window(label="Settings", width=583, height=681, pos=(681, 0), no_resize
             dpg.add_text("Position  ")
 
             dpg.add_text("X")
-            dpg.add_input_float(tag="create_x_input", step=100, step_fast=1000, width=217)
+            dpg.add_input_float(tag="create_x_input", step=100, step_fast=1000, width=137)
 
             dpg.add_text("Y")
-            dpg.add_input_float(tag="create_y_input", step=100, step_fast=1000, width=217)
+            dpg.add_input_float(tag="create_y_input", step=100, step_fast=1000, width=137)
+
+            dpg.add_text("z")
+            dpg.add_input_float(tag="create_z_input", step=100, step_fast=1000, width=137)
 
         with dpg.group(horizontal=True):
             dpg.add_text("Velocity  ")
 
             dpg.add_text("X")
-            dpg.add_input_float(tag="create_vx_input", step=100, step_fast=1000, width=217)
+            dpg.add_input_float(tag="create_vx_input", step=100, step_fast=1000, width=137)
 
             dpg.add_text("Y")
-            dpg.add_input_float(tag="create_vy_input", step=100, step_fast=1000, width=217)
+            dpg.add_input_float(tag="create_vy_input", step=100, step_fast=1000, width=137)
+
+            dpg.add_text("z")
+            dpg.add_input_float(tag="create_vz_input", step=100, step_fast=1000, width=137)
 
         with dpg.group(horizontal=True, width=-1):
             dpg.add_text("Mass      ")
@@ -420,22 +504,30 @@ with dpg.window(label="Settings", width=583, height=681, pos=(681, 0), no_resize
 
             with dpg.group(horizontal=True, tag="selected_body_x_group"):
                 dpg.add_text("X")
-                dpg.add_input_float(tag="selected_body_x_input", step=100, step_fast=1000, width=217, default_value=selected_body.position.x, callback=edit_body)
+                dpg.add_input_float(tag="selected_body_x_input", step=100, step_fast=1000, width=137, default_value=selected_body.position.x, callback=edit_body)
 
             with dpg.group(horizontal=True, tag="selected_body_y_group"):
                 dpg.add_text("Y")
-                dpg.add_input_float(tag="selected_body_y_input", step=100, step_fast=1000, width=217, default_value=selected_body.position.y, callback=edit_body)
+                dpg.add_input_float(tag="selected_body_y_input", step=100, step_fast=1000, width=137, default_value=selected_body.position.y, callback=edit_body)
+
+            with dpg.group(horizontal=True, tag="selected_body_z_group"):
+                dpg.add_text("Z")
+                dpg.add_input_float(tag="selected_body_z_input", step=100, step_fast=1000, width=137, default_value=selected_body.position.y, callback=edit_body)
 
         with dpg.group(horizontal=True, tag="selected_body_velocity_group"):
             dpg.add_text("Velocity  ")
 
             with dpg.group(horizontal=True, tag="selected_body_vx_group"):
                 dpg.add_text("X")
-                dpg.add_input_float(tag="selected_body_vx_input", step=100, step_fast=1000, width=217, default_value=selected_body.velocity.x, callback=edit_body)
+                dpg.add_input_float(tag="selected_body_vx_input", step=100, step_fast=1000, width=137, default_value=selected_body.velocity.x, callback=edit_body)
 
             with dpg.group(horizontal=True, tag="selected_body_vy_group"):
                 dpg.add_text("Y")
-                dpg.add_input_float(tag="selected_body_vy_input", step=100, step_fast=1000, width=217, default_value=selected_body.velocity.y, callback=edit_body)
+                dpg.add_input_float(tag="selected_body_vy_input", step=100, step_fast=1000, width=137, default_value=selected_body.velocity.y, callback=edit_body)
+
+            with dpg.group(horizontal=True, tag="selected_body_vz_group"):
+                dpg.add_text("Z")
+                dpg.add_input_float(tag="selected_body_vz_input", step=100, step_fast=1000, width=137, default_value=selected_body.velocity.y, callback=edit_body)
 
         with dpg.group(horizontal=True, width=-1, tag="selected_body_mass_group"):
             dpg.add_text("Mass      ")
@@ -446,7 +538,7 @@ with dpg.window(label="Settings", width=583, height=681, pos=(681, 0), no_resize
 
     # endregion
 
-    dpg.add_spacer(height=64)
+    dpg.add_spacer(height=41)
 
     with dpg.group():
         dpg.add_text("Simulation Progress")
@@ -479,16 +571,17 @@ with dpg.window(label="Settings", width=583, height=681, pos=(681, 0), no_resize
 
 # endregion
 
-create_body_manual("Sun", Vec2(0, 0), Vec2(0, 0), 1988500E24, [249, 215, 28, 255])
-create_body_manual("Mercury", Vec2(57.9E9, 0), Vec2(0, 47900), 0.330E24, [26, 26, 26, 255])
-create_body_manual("Venus", Vec2(108.2E9, 0), Vec2(0, 35000), 4.87E24, [230, 230, 230, 255])
-create_body_manual("Earth", Vec2(149.6E9, 0), Vec2(0, 29800), 5.97E24, [47, 106, 105, 255])
-create_body_manual("Moon", Vec2(149.6E9 + 0.384E9, 0), Vec2(0, 29800 + 1000), 0.073E24, [254, 252, 215, 255])
-create_body_manual("Mars", Vec2(228.0E9, 0), Vec2(0, 24000), 0.642E24, [153, 61, 0, 255])
-create_body_manual("Jupiter", Vec2(778.5E9, 0), Vec2(0, 13100), 1898E24, [176, 127, 53, 255])
-create_body_manual("Saturn", Vec2(1432.0E9, 0), Vec2(0, 9690), 568E24, [176, 143, 54, 255])
-create_body_manual("Uranus", Vec2(2867.0E9, 0), Vec2(0, 6810), 86.8E24, [85, 128, 170, 255])
-create_body_manual("Neptune", Vec2(4515.0E9, 0), Vec2(0, 5430), 102E24, [54, 104, 150, 255])
+create_body_manual("Sun", Vec3(0, 0, 0), Vec3(0, 0, 0), 1988500E24, [249, 215, 28, 255])
+create_body_manual("Mercury", Vec3(57.9E9, 0, 0), Vec3(0, 47900, 0), 0.330E24, [26, 26, 26, 255])
+create_body_manual("Venus", Vec3(108.2E9, 0, 0), Vec3(0, 35000, 0), 4.87E24, [230, 230, 230, 255])
+create_body_manual("Earth", Vec3(149.6E9, 0, 0), Vec3(0, 29800, 0), 5.97E24, [47, 106, 105, 255])
+create_body_manual("Moon", Vec3(149.6E9 + 0.384E9, 0, 0), Vec3(0, 29800 + 1000, 0), 0.073E24, [254, 252, 215, 255])
+create_body_manual("Mars", Vec3(228.0E9, 0, 0), Vec3(0, 24000, 0), 0.642E24, [153, 61, 0, 255])
+create_body_manual("Jupiter", Vec3(778.5E9, 0, 0), Vec3(0, 13100, 0), 1898E24, [176, 127, 53, 255])
+create_body_manual("Saturn", Vec3(1432.0E9, 0, 0), Vec3(0, 9690, 0), 568E24, [176, 143, 54, 255])
+create_body_manual("Uranus", Vec3(2867.0E9, 0, 0), Vec3(0, 6810, 0), 86.8E24, [85, 128, 170, 255])
+create_body_manual("Neptune", Vec3(4515.0E9, 0, 0), Vec3(0, 5430, 0), 102E24, [54, 104, 150, 255])
+create_body_manual("Pluto", Vec3(7304.326E9, 0, 7304.326E9 * np.sin(2.995)), Vec3(0, 4670, 0), 0.01303E24, [54, 104, 150, 255])
 
 dpg.show_viewport()
 dpg.start_dearpygui()
