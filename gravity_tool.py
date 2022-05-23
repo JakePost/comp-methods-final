@@ -5,16 +5,19 @@ from collections import namedtuple
 
 # region Global Definitions and Variables
 
+# Named tuples acting as sudo-classes for ease of data storage and manipulation
 Body = namedtuple('Body', ['id', 'name', 'position', 'velocity', 'mass', 'color'])
 Vec2 = namedtuple('Vector2', ['x', 'y'])
 Vec3 = namedtuple('Vector3', ['x', 'y', 'z'])
 
+# Default settings for graph scale and center location
 default_graph_scale = 11.5
 graph_scale = 11.5
 graph_center_x = 0
 graph_center_y = 0
 graph_center_z = 0
 
+# Default colors looped through when creating a new body
 colors = [[68, 216, 0, 255],
           [255, 140, 0, 255],
           [127, 0, 255, 255],
@@ -26,29 +29,40 @@ colors = [[68, 216, 0, 255],
           [0, 255, 206, 255],
           [255, 29, 206, 255]]
 
+# Keep track of how many bodies are created and what default color will be selected in the creation menu
 body_count = 1
 body_color = colors[0]
 
+# Main dictionary holding all created bodies
 bodies = {}
+
+# List of body names for use in body selection menu
 body_names = []
 
 selected_body = Body(0, "", Vec3(0, 0, 0), Vec3(0, 0, 0), 0, [0, 0, 0, 0])
 
+# Reset flag that prevents the editing of bodies before a simulation is reset and the trajectories are cleared
 reset = True
+
+
+# Method used for copying a body but with a different position and velocity
+def copy_body(body, position, velocity):
+    return Body(body.id, body.name, position, velocity, body.mass, body.color)
 
 # endregion
 
 
 # region Physical Models and Calculations
 
-def n_body_grav_accel(body, n_bodies):
+# Calculate the total acceleration of a body based on the summed forced of n other bodies
+def n_body_accel(body, n_bodies):
     accel_sum_x = 0
     accel_sum_y = 0
     accel_sum_z = 0
 
     for n_body in n_bodies:
-        r = np.sqrt((body.position.x - n_body.position.x) ** 2 + (body.position.y - n_body.position.y) ** 2 + (body.position.z - n_body.position.z) ** 2)
-        scaler = -(const.G.value * n_body.mass) / r ** 3
+        distance = np.sqrt((body.position.x - n_body.position.x) ** 2 + (body.position.y - n_body.position.y) ** 2 + (body.position.z - n_body.position.z) ** 2)
+        scaler = -(const.G.value * n_body.mass) / distance ** 3
 
         accel_sum_x += (body.position.x - n_body.position.x) * scaler
         accel_sum_y += (body.position.y - n_body.position.y) * scaler
@@ -57,89 +71,72 @@ def n_body_grav_accel(body, n_bodies):
     return Vec3(accel_sum_x, accel_sum_y, accel_sum_z)
 
 
-def current_body(body, position, velocity):
-    return Body(body.id, body.name, position, velocity, body.mass, body.color)
-
-
-def reset_trajectories():
-    for body_key, body_value in bodies.items():
-        if dpg.does_item_exist(f"td_line_{body_key}"):
-            dpg.delete_item(f"td_line_{body_key}")
-
-        if dpg.does_item_exist(f"side_line_{body_key}"):
-            dpg.delete_item(f"side_line_{body_key}")
-
-        if dpg.does_item_exist(f"line_theme_{body_key}"):
-            dpg.delete_item(f"line_theme_{body_key}")
-
-        dpg.set_value(f"td_drag_{body_key}", Vec2(body_value.position.x, body_value.position.y))
-        dpg.set_value(f"side_drag_{body_key}", Vec2(body_value.position.x, body_value.position.z))
-
-        with dpg.theme(tag=f"line_theme_{body_key}"):
-            with dpg.theme_component(dpg.mvLineSeries):
-                dpg.add_theme_color(dpg.mvPlotCol_Line, body_value.color, category=dpg.mvThemeCat_Plots)
-
-        dpg.add_line_series([], [], parent="td_y_axis", tag=f"td_line_{body_key}")
-        dpg.add_line_series([], [], parent="side_z_axis", tag=f"side_line_{body_key}")
-
-        dpg.bind_item_theme(f"td_line_{body_key}", f"line_theme_{body_key}")
-        dpg.bind_item_theme(f"side_line_{body_key}", f"line_theme_{body_key}")
-
-    global reset
-    reset = True
-
-
+# Using the Verlet Integration, solve for the new position, velocity, and acceleration of each body
 def calculate_trajectories():
     reset_trajectories()
 
     global reset
     reset = False
 
-    h = dpg.get_value("step_size")
-    sim_time = dpg.get_value("sim_time")
-    update_freq = dpg.get_value("update_freq")
+    step_size = dpg.get_value("step_size")  # Size of time step for use in integration (dt, or h)
+    sim_time = dpg.get_value("sim_time")  # Length of simulation based on time step
+    update_freq = dpg.get_value("update_freq")  # Used to improve performance by only updating graph every x time steps
 
     body_positions = {}
     body_velocities = {}
     body_accelerations = {}
 
+    # Fill dictionaries with empty lists containing zeroed positional, velocity, and acceleration data for each body based on sim_time
     for body_key, body_value in bodies.items():
         body_positions[body_key] = [Vec3(0, 0, 0) for _ in range(0, sim_time)]
-
+        # Insert starting position
         body_positions[body_key][0] = body_value.position
 
         body_velocities[body_key] = [Vec3(0, 0, 0) for _ in range(0, sim_time)]
+        # Insert starting velocity
         body_velocities[body_key][0] = body_value.velocity
 
         body_accelerations[body_key] = [Vec3(0, 0, 0) for _ in range(0, sim_time)]
         n_bodies = [value for key, value in bodies.items() if key != body_key]
 
-        body_accelerations[body_key][0] = n_body_grav_accel(body_value, n_bodies)
+        # Calculate and insert starting acceleration
+        body_accelerations[body_key][0] = n_body_accel(body_value, n_bodies)
 
+    # For each time step, calculate the next position, velocity, and acceleration values for each body
     for i in range(0, sim_time - 1):
+        # First calculate all the new positions (t + dt) of the bodies
         for body_key, body_value in bodies.items():
-            body = current_body(body_value, body_positions[body_key][i], body_velocities[body_key][i])
-
-            n_bodies = [current_body(value, body_positions[key][i], body_velocities[key][i]) for key, value in bodies.items() if key != body_key]
+            body = copy_body(body_value, body_positions[body_key][i], body_velocities[body_key][i])
 
             accel = body_accelerations[body_key][i]
 
-            x = body.position.x + body.velocity.x * h + accel.x * (h * h * 0.5)
-            y = body.position.y + body.velocity.y * h + accel.y * (h * h * 0.5)
-            z = body.position.z + body.velocity.z * h + accel.z * (h * h * 0.5)
+            # Calculate the new position based on the previous velocity and acceleration
+            # p(t + dt) = p(t) + v(t) * dt + a(t) * dt^2 * 0.5
+            x = body.position.x + body.velocity.x * step_size + accel.x * ((step_size ** 2) / 2)
+            y = body.position.y + body.velocity.y * step_size + accel.y * ((step_size ** 2) / 2)
+            z = body.position.z + body.velocity.z * step_size + accel.z * ((step_size ** 2) / 2)
             new_position = Vec3(x, y, z)
 
-            new_accel = n_body_grav_accel(body, n_bodies)
+            body_positions[body_key][i + 1] = new_position
 
-            vx = body.velocity.x + (accel.x + new_accel.x) * (h / 2)
-            vy = body.velocity.y + (accel.y + new_accel.y) * (h / 2)
-            vz = body.velocity.z + (accel.z + new_accel.z) * (h / 2)
+        # Next calculate the new acceleration based on the new positions, and solve for the velocity at that position
+        for body_key, body_value in bodies.items():
+            body = copy_body(body_value, body_positions[body_key][i + 1], body_velocities[body_key][i])
+            n_bodies = [copy_body(value, body_positions[key][i], body_velocities[key][i]) for key, value in bodies.items() if key != body_key]
+
+            accel = body_accelerations[body_key][i]
+            new_accel = n_body_accel(body, n_bodies)
+
+            # Calculate the new velocity
+            vx = body.velocity.x + (accel.x + new_accel.x) * (step_size / 2)
+            vy = body.velocity.y + (accel.y + new_accel.y) * (step_size / 2)
+            vz = body.velocity.z + (accel.z + new_accel.z) * (step_size / 2)
             new_velocity = Vec3(vx, vy, vz)
 
-            body_positions[body_key][i + 1] = new_position
             body_velocities[body_key][i + 1] = new_velocity
             body_accelerations[body_key][i + 1] = new_accel
 
+            # Update the graph every n frame based on update_freq
             if i % update_freq == 0:
                 x_pos = [r.x for r in body_positions[body_key][0:i + 1]]
                 y_pos = [r.y for r in body_positions[body_key][0:i + 1]]
@@ -150,6 +147,19 @@ def calculate_trajectories():
 
                 dpg.set_value(f"td_drag_{body_key}", [x_pos[i], y_pos[i]])
                 dpg.set_value(f"side_drag_{body_key}", [x_pos[i], z_pos[i]])
+
+                if selected_body.id == body.id:
+
+                    global graph_center_x
+                    graph_center_x = x_pos[i]
+
+                    global graph_center_y
+                    graph_center_y = y_pos[i] / 0.559
+
+                    global graph_center_z
+                    graph_center_z = z_pos[i]
+
+                    update_graph_position()
 
         dpg.set_value("sim_progress", i / (sim_time - 1))
 
@@ -168,16 +178,16 @@ dpg.setup_dearpygui()
 # region Item Update Wrapper Methods
 
 def update_graph_position():
-    dpg.set_axis_limits("td_x_axis", graph_center_x - graph_scale, graph_center_x + graph_scale)
-    dpg.set_axis_limits("td_y_axis", (graph_center_y - graph_scale) * 0.559, (graph_center_y + graph_scale) * 0.559)
+    dpg.set_axis_limits("td_x_axis", graph_center_x - 10 ** graph_scale, graph_center_x + 10 ** graph_scale)
+    dpg.set_axis_limits("td_y_axis", (graph_center_y - 10 ** graph_scale) * 0.559, (graph_center_y + 10 ** graph_scale) * 0.559)
 
-    dpg.set_axis_limits("side_x_axis", graph_center_x - graph_scale, graph_center_x + graph_scale)
-    dpg.set_axis_limits("side_z_axis", (graph_center_z - graph_scale) * 0.383, (graph_center_z + graph_scale) * 0.383)
+    dpg.set_axis_limits("side_x_axis", graph_center_x - 10 ** graph_scale, graph_center_x + 10 ** graph_scale)
+    dpg.set_axis_limits("side_z_axis", (graph_center_z - 10 ** graph_scale) * 0.383, (graph_center_z + 10 ** graph_scale) * 0.383)
 
 
 def update_graph_scale(_, value):
     global graph_scale
-    graph_scale = 10 ** value
+    graph_scale = value
     update_graph_position()
 
 
@@ -260,6 +270,35 @@ def reset_selected_body():
     global selected_body
     selected_body = Body(0, "", Vec3(0, 0, 0), Vec3(0, 0, 0), 0, [0, 0, 0, 0])
 
+
+def reset_trajectories():
+    for body_key, body_value in bodies.items():
+        if dpg.does_item_exist(f"td_line_{body_key}"):
+            dpg.delete_item(f"td_line_{body_key}")
+
+        if dpg.does_item_exist(f"side_line_{body_key}"):
+            dpg.delete_item(f"side_line_{body_key}")
+
+        if dpg.does_item_exist(f"line_theme_{body_key}"):
+            dpg.delete_item(f"line_theme_{body_key}")
+
+        dpg.set_value(f"td_drag_{body_key}", Vec2(body_value.position.x, body_value.position.y))
+        dpg.set_value(f"side_drag_{body_key}", Vec2(body_value.position.x, body_value.position.z))
+
+        with dpg.theme(tag=f"line_theme_{body_key}"):
+            with dpg.theme_component(dpg.mvLineSeries):
+                dpg.add_theme_color(dpg.mvPlotCol_Line, body_value.color, category=dpg.mvThemeCat_Plots)
+
+        dpg.add_line_series([], [], parent="td_y_axis", tag=f"td_line_{body_key}")
+        dpg.add_line_series([], [], parent="side_z_axis", tag=f"side_line_{body_key}")
+
+        dpg.bind_item_theme(f"td_line_{body_key}", f"line_theme_{body_key}")
+        dpg.bind_item_theme(f"side_line_{body_key}", f"line_theme_{body_key}")
+
+    global reset
+    reset = True
+
+
 # endregion
 
 
@@ -308,6 +347,7 @@ def select_body(item_tag):
 
     global selected_body
     selected_body = bodies[body_id]
+    print(selected_body)
 
     update_selected_body_group()
 
@@ -380,7 +420,8 @@ def create_body():
 def delete_body():
     bodies.pop(selected_body.id)
     body_names.remove(selected_body.name)
-    dpg.delete_item(selected_body.id)
+    dpg.delete_item(f"td_drag_{selected_body.id}")
+    dpg.delete_item(f"side_drag_{selected_body.id}")
     reset_selected_body()
     update_selected_body_group()
 
@@ -498,7 +539,7 @@ with dpg.window(label="Settings", width=583, height=681, pos=(681, 0), no_resize
         with dpg.group(horizontal=True, tag="selected_body_group"):
             with dpg.drawlist(width=20, height=20, tag="selected_body_drawlist"):
                 dpg.draw_circle((10, 9), 5, fill=selected_body.color, tag="selected_body_circle")
-            dpg.add_combo(body_names, default_value="Earth", tag="selected_body_combo", callback=select_body)
+            dpg.add_combo(body_names, tag="selected_body_combo", callback=select_body)
 
         with dpg.group(horizontal=True):
             dpg.add_text("Position  ")
@@ -550,15 +591,15 @@ with dpg.window(label="Settings", width=583, height=681, pos=(681, 0), no_resize
     with dpg.group(horizontal=True):
         with dpg.group(width=183):
             dpg.add_text("Step Size (s)")
-            dpg.add_input_int(tag="step_size", default_value=3600)
+            dpg.add_input_int(tag="step_size", default_value=500)
 
         with dpg.group(width=184):
             dpg.add_text("Sim Time (h)")
-            dpg.add_input_int(tag="sim_time", default_value=8760)
+            dpg.add_input_int(tag="sim_time", default_value=64000)
 
         with dpg.group(width=183):
             dpg.add_text("Update Freq (h)")
-            dpg.add_input_int(tag="update_freq", default_value=24)
+            dpg.add_input_int(tag="update_freq", default_value=1000)
 
     dpg.add_spacer()
 
@@ -573,16 +614,16 @@ with dpg.window(label="Settings", width=583, height=681, pos=(681, 0), no_resize
 # endregion
 
 create_body_manual("Sun", Vec3(0, 0, 0), Vec3(0, 0, 0), 1988500E24, [249, 215, 28, 255])
-create_body_manual("Mercury", Vec3(57.9E9, 0, 0), Vec3(0, 47900, 0), 0.330E24, [26, 26, 26, 255])
-create_body_manual("Venus", Vec3(108.2E9, 0, 0), Vec3(0, 35000, 0), 4.87E24, [230, 230, 230, 255])
-create_body_manual("Earth", Vec3(149.6E9, 0, 0), Vec3(0, 29800, 0), 5.97E24, [47, 106, 105, 255])
-create_body_manual("Moon", Vec3(149.6E9 + 0.384E9, 0, 0), Vec3(0, 29800 + 1000, 0), 0.073E24, [254, 252, 215, 255])
-create_body_manual("Mars", Vec3(228.0E9, 0, 0), Vec3(0, 24000, 0), 0.642E24, [153, 61, 0, 255])
-create_body_manual("Jupiter", Vec3(778.5E9, 0, 0), Vec3(0, 13100, 0), 1898E24, [176, 127, 53, 255])
-create_body_manual("Saturn", Vec3(1432.0E9, 0, 0), Vec3(0, 9690, 0), 568E24, [176, 143, 54, 255])
-create_body_manual("Uranus", Vec3(2867.0E9, 0, 0), Vec3(0, 6810, 0), 86.8E24, [85, 128, 170, 255])
-create_body_manual("Neptune", Vec3(4515.0E9, 0, 0), Vec3(0, 5430, 0), 102E24, [54, 104, 150, 255])
-create_body_manual("Pluto", Vec3(7304.326E9, 0, 7304.326E9 * np.sin(2.995)), Vec3(0, 4670, 0), 0.01303E24, [54, 104, 150, 255])
+# create_body_manual("Mercury", Vec3(57.9E9, 0, 0), Vec3(0, 47900, 0), 0.330E24, [26, 26, 26, 255])
+# create_body_manual("Venus", Vec3(108.2E9, 0, 0), Vec3(0, 35000, 0), 4.87E24, [230, 230, 230, 255])
+create_body_manual("Earth", Vec3(152.1E9, 0, 0), Vec3(0, 29290, 0), 5.9722E24, [47, 106, 105, 255])
+create_body_manual("Moon", Vec3(152.1E9 - 0.4055E9, 0, 0), Vec3(0, 29290 + 970, 0), 0.07346E24, [254, 252, 215, 255])
+# create_body_manual("Mars", Vec3(228.0E9, 0, 0), Vec3(0, 24000, 0), 0.642E24, [153, 61, 0, 255])
+# create_body_manual("Jupiter", Vec3(778.5E9, 0, 0), Vec3(0, 13100, 0), 1898E24, [176, 127, 53, 255])
+# create_body_manual("Saturn", Vec3(1432.0E9, 0, 0), Vec3(0, 9690, 0), 568E24, [176, 143, 54, 255])
+# create_body_manual("Uranus", Vec3(2867.0E9, 0, 0), Vec3(0, 6810, 0), 86.8E24, [85, 128, 170, 255])
+# create_body_manual("Neptune", Vec3(4515.0E9, 0, 0), Vec3(0, 5430, 0), 102E24, [54, 104, 150, 255])
+# create_body_manual("Pluto", Vec3(7304.326E9, 0, 7304.326E9 * np.sin(2.995)), Vec3(0, 4670, 0), 0.01303E24, [54, 104, 150, 255])
 
 dpg.show_viewport()
 dpg.start_dearpygui()
