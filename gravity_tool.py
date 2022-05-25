@@ -61,7 +61,10 @@ def n_body_accel(body, n_bodies):
     accel_sum_z = 0
 
     for n_body in n_bodies:
-        distance = np.sqrt((body.position.x - n_body.position.x) ** 2 + (body.position.y - n_body.position.y) ** 2 + (body.position.z - n_body.position.z) ** 2)
+        distance = np.sqrt((body.position.x - n_body.position.x) ** 2
+                           + (body.position.y - n_body.position.y) ** 2
+                           + (body.position.z - n_body.position.z) ** 2)
+
         scaler = -(const.G.value * n_body.mass) / distance ** 3
 
         accel_sum_x += (body.position.x - n_body.position.x) * scaler
@@ -86,7 +89,8 @@ def calculate_trajectories():
     body_velocities = {}
     body_accelerations = {}
 
-    # Fill dictionaries with empty lists containing zeroed positional, velocity, and acceleration data for each body based on sim_time
+    # Fill dictionaries with empty lists containing zeroed positional, velocity,
+    # and acceleration data for each body based on sim_time
     for body_key, body_value in bodies.items():
         body_positions[body_key] = [Vec3(0, 0, 0) for _ in range(0, sim_time)]
         # Insert starting position
@@ -122,7 +126,7 @@ def calculate_trajectories():
         # Next calculate the new acceleration based on the new positions, and solve for the velocity at that position
         for body_key, body_value in bodies.items():
             body = copy_body(body_value, body_positions[body_key][i + 1], body_velocities[body_key][i])
-            n_bodies = [copy_body(value, body_positions[key][i], body_velocities[key][i]) for key, value in bodies.items() if key != body_key]
+            n_bodies = [copy_body(value, body_positions[key][i + 1], body_velocities[key][i]) for key, value in bodies.items() if key != body_key]
 
             accel = body_accelerations[body_key][i]
             new_accel = n_body_accel(body, n_bodies)
@@ -614,7 +618,7 @@ with dpg.window(label="Settings", width=583, height=681, pos=(681, 0), no_resize
 # endregion
 
 create_body_manual("Sun", Vec3(0, 0, 0), Vec3(0, 0, 0), 1988500E24, [249, 215, 28, 255])
-# create_body_manual("Mercury", Vec3(57.9E9, 0, 0), Vec3(0, 47900, 0), 0.330E24, [26, 26, 26, 255])
+# create_body_manual("Mercury", Vec3(57.9E9, 0, 0), Vec3(0, 47900, 0), 0.330E24, [255, 0, 0, 255])
 # create_body_manual("Venus", Vec3(108.2E9, 0, 0), Vec3(0, 35000, 0), 4.87E24, [230, 230, 230, 255])
 create_body_manual("Earth", Vec3(152.1E9, 0, 0), Vec3(0, 29290, 0), 5.9722E24, [47, 106, 105, 255])
 create_body_manual("Moon", Vec3(152.1E9 - 0.4055E9, 0, 0), Vec3(0, 29290 + 970, 0), 0.07346E24, [254, 252, 215, 255])
